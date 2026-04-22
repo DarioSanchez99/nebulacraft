@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "export",
+  basePath: "/nebulacraft",
+  trailingSlash: true,
   typescript: {
     ignoreBuildErrors: true,
   },
