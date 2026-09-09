@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { ACHIEVEMENTS, type AchievementStats } from "@/lib/achievements"
 
 // ─── Shop packs ──────────────────────────────────────────────────────────────
 
@@ -21,14 +21,16 @@ const GEM_BOOSTS = [
 
 // ─── Shop Modal ───────────────────────────────────────────────────────────────
 
-function ShopModal({ gems, onClose, onBuyPack, onBuyBoost }: {
+function ShopModal({ gems, activeBoosts, onClose, onBuyPack, onBuyBoost }: {
   gems: number
+  activeBoosts: ActiveBoosts
   onClose: () => void
   onBuyPack: (pack: typeof GEM_PACKS[0]) => void
   onBuyBoost: (boost: typeof GEM_BOOSTS[0]) => void
 }) {
   const [tab, setTab] = useState<"packs" | "boosts">("packs")
   const [bought, setBought] = useState<string | null>(null)
+  const now = Date.now()
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
@@ -85,17 +87,29 @@ function ShopModal({ gems, onClose, onBuyPack, onBuyBoost }: {
             <div className="space-y-3">
               {GEM_BOOSTS.map(boost => {
                 const canAfford = gems >= boost.cost
+                const boostKey = boost.effect as keyof ActiveBoosts
+                const endTime = activeBoosts[boostKey]
+                const isActive = endTime !== null && endTime > now
+                const remainingMs = isActive && endTime ? endTime - now : 0
+                const remainingMin = Math.ceil(remainingMs / 60_000)
                 return (
-                  <button key={boost.id} onClick={() => { if (canAfford) { onBuyBoost(boost); setBought(boost.id); setTimeout(() => setBought(null), 1500) }}}
-                    disabled={!canAfford}
-                    className={`w-full flex items-center gap-4 p-4 rounded-xl border transition-all ${canAfford ? "border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20" : "border-white/5 bg-white/5 opacity-40 cursor-not-allowed"}`}>
+                  <button key={boost.id} onClick={() => { if (canAfford && !isActive) { onBuyBoost(boost); setBought(boost.id); setTimeout(() => setBought(null), 1500) }}}
+                    disabled={!canAfford || isActive}
+                    className={`w-full flex items-center gap-4 p-4 rounded-xl border transition-all ${
+                      isActive
+                        ? "border-green-500/40 bg-green-500/10 cursor-not-allowed"
+                        : canAfford
+                        ? "border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20"
+                        : "border-white/5 bg-white/5 opacity-40 cursor-not-allowed"
+                    }`}>
                     <span className="text-3xl">{boost.icon}</span>
                     <div className="text-left flex-1">
                       <div className="font-bold text-white">{boost.name}</div>
                       <div className="text-xs text-white/50">{boost.description}</div>
+                      {isActive && <div className="text-xs text-green-400 mt-0.5">Activo — {remainingMin} min restantes</div>}
                     </div>
                     <div className={`font-bold text-yellow-300 transition-transform ${bought === boost.id ? "scale-150 text-green-400" : ""}`}>
-                      {bought === boost.id ? "✓" : `💎${boost.cost}`}
+                      {isActive ? "✓" : bought === boost.id ? "✓" : `💎${boost.cost}`}
                     </div>
                   </button>
                 )
@@ -107,6 +121,97 @@ function ShopModal({ gems, onClose, onBuyPack, onBuyBoost }: {
         <div className="p-4 border-t border-white/10 text-center">
           <button onClick={onClose} className="text-white/40 text-sm hover:text-white transition-colors">Cerrar</button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Achievement Toast ────────────────────────────────────────────────────────
+
+function AchievementToast({ achievement, onDone }: { achievement: { name: string; icon: string; description: string }; onDone: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 4000)
+    return () => clearTimeout(t)
+  }, [onDone])
+
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3 bg-[#1a0040] border border-purple-500/60 rounded-2xl px-5 py-4 shadow-2xl"
+      style={{ animation: "slideUp 0.4s ease forwards" }}>
+      <span className="text-3xl">{achievement.icon}</span>
+      <div>
+        <div className="text-xs text-purple-400 font-bold uppercase tracking-widest">Logro desbloqueado</div>
+        <div className="text-sm font-bold text-white">{achievement.name}</div>
+        <div className="text-xs text-white/50">{achievement.description}</div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Achievements Panel ───────────────────────────────────────────────────────
+
+function AchievementsPanel({ unlocked, onClose }: { unlocked: string[]; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
+      <div className="relative w-full max-w-md mx-4 bg-[#0a0018] border border-white/20 rounded-2xl overflow-hidden shadow-2xl"
+        onClick={e => e.stopPropagation()}>
+        <div className="bg-gradient-to-r from-purple-900 to-blue-900 p-5 flex items-center justify-between">
+          <h2 className="text-xl font-bold text-white">🏆 Logros</h2>
+          <span className="text-sm text-purple-300">{unlocked.length}/{ACHIEVEMENTS.length}</span>
+        </div>
+        <div className="p-4 max-h-[70vh] overflow-y-auto space-y-3">
+          {ACHIEVEMENTS.map(a => {
+            const done = unlocked.includes(a.id)
+            return (
+              <div key={a.id} className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${done ? "border-purple-500/40 bg-purple-500/10" : "border-white/5 bg-white/5 opacity-50"}`}>
+                <span className="text-2xl" style={{ filter: done ? "none" : "grayscale(1)" }}>{a.icon}</span>
+                <div className="flex-1">
+                  <div className={`text-sm font-bold ${done ? "text-white" : "text-white/40"}`}>{a.name}</div>
+                  <div className="text-xs text-white/40">{a.description}</div>
+                </div>
+                {done && <span className="text-green-400 text-lg">✓</span>}
+              </div>
+            )
+          })}
+        </div>
+        <div className="p-4 border-t border-white/10 text-center">
+          <button onClick={onClose} className="text-white/40 text-sm hover:text-white transition-colors">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Singularity / Prestige Screen ───────────────────────────────────────────
+
+function SingularityScreen({ prestigeLevel, onPrestige }: { prestigeLevel: number; onPrestige: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md">
+      <div className="text-center max-w-sm mx-4">
+        <div className="text-7xl mb-4" style={{ animation: "pulse 2s ease-in-out infinite" }}>🕳️</div>
+        <h2 className="text-3xl font-bold text-white mb-2 tracking-wide">¡Has alcanzado la Singularidad!</h2>
+        <p className="text-white/50 text-sm mb-6 leading-relaxed">
+          El tiempo y el espacio se doblan a tu voluntad. Has llegado al final del universo conocido.<br/>
+          ¿Te atreves a reiniciar y forjar una nueva galaxia con poderes amplificados?
+        </p>
+
+        {prestigeLevel > 0 && (
+          <div className="mb-4 text-purple-300 text-sm">
+            Nivel de prestigio actual: <span className="font-bold text-yellow-300">✦{prestigeLevel}</span> — multiplicador permanente ×{(1 + prestigeLevel * 0.5).toFixed(1)}
+          </div>
+        )}
+
+        <div className="bg-white/5 border border-purple-500/30 rounded-2xl p-4 mb-6 text-left text-sm space-y-1">
+          <div className="text-white/70">Al hacer Prestige obtendrás:</div>
+          <div className="text-yellow-300">✦ Nivel de Prestigio {prestigeLevel + 1}</div>
+          <div className="text-yellow-300">✦ Multiplicador permanente ×{(1 + (prestigeLevel + 1) * 0.5).toFixed(1)} en todo el juego</div>
+          <div className="text-red-400 text-xs mt-2">⚠ Se perderá todo el progreso actual (excepto gemas y logros)</div>
+        </div>
+
+        <button onClick={onPrestige}
+          className="w-full py-4 rounded-2xl font-bold text-white text-lg bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition-all shadow-lg shadow-purple-900/50">
+          ✦ Prestige Reset
+        </button>
+        <p className="text-white/20 text-xs mt-3">O sigue acumulando polvo estelar sin límite</p>
       </div>
     </div>
   )
@@ -142,6 +247,12 @@ interface Particle {
   vy: number
   life: number
   value: string
+}
+
+/** Stores end timestamps (ms since epoch) for timed boosts, null = inactive */
+interface ActiveBoosts {
+  click: number | null
+  farm: number | null
 }
 
 // ─── Stage definitions ───────────────────────────────────────────────────────
@@ -463,7 +574,6 @@ function Stars() {
 // ─── Main Game ────────────────────────────────────────────────────────────────
 
 export default function NebulaCraft() {
-  const router = useRouter()
   const [stardust, setStardust] = useState(0)
   const [totalStardust, setTotalStardust] = useState(0)
   const [clickPower, setClickPower] = useState(1)
@@ -473,16 +583,37 @@ export default function NebulaCraft() {
   const [pulse, setPulse] = useState(false)
   const [tab, setTab] = useState<"producers" | "upgrades">("producers")
   const [showShop, setShowShop] = useState(false)
+  const [showAchievements, setShowAchievements] = useState(false)
   const [gems, setGems] = useState(0)
-  const [user, setUser] = useState<{ username: string } | null>(null)
+  const [username, setUsername] = useState<string | null>(null)
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState("")
+
+  // Achievements state
+  const [unlockedAchievements, setUnlockedAchievements] = useState<string[]>([])
+  const [toastAchievement, setToastAchievement] = useState<{ id: string; name: string; icon: string; description: string } | null>(null)
+  const [totalClicks, setTotalClicks] = useState(0)
+  const [totalMinutesPlayed, setTotalMinutesPlayed] = useState(0)
+
+  // Prestige
+  const [prestigeLevel, setPrestigeLevel] = useState(0)
+  const [showSingularity, setShowSingularity] = useState(false)
+  const singularityShownRef = useRef(false)
+
+  // Active boosts (timed): stored as end-timestamps (ms)
+  const [activeBoosts, setActiveBoosts] = useState<ActiveBoosts>({ click: null, farm: null })
+
   const particleId = useRef(0)
 
   const stage = STAGES.findLastIndex((s) => totalStardust >= s.threshold)
   const currentStage = Math.max(0, stage)
 
+  // Prestige multiplier applied to base click power and production
+  const prestigeMultiplier = 1 + prestigeLevel * 0.5
+
   const perSecond = producers.reduce((sum, p) => sum + p.baseProduction * p.count, 0)
 
-  // Load from localStorage
+  // ─── Load from localStorage ────────────────────────────────────────────────
   useEffect(() => {
     try {
       const saved = localStorage.getItem("nebulacraft")
@@ -492,40 +623,131 @@ export default function NebulaCraft() {
         setTotalStardust(data.totalStardust ?? 0)
         setClickPower(data.clickPower ?? 1)
         setGems(data.gems ?? 0)
+        setTotalClicks(data.totalClicks ?? 0)
+        setTotalMinutesPlayed(data.totalMinutesPlayed ?? 0)
+        setUnlockedAchievements(data.unlockedAchievements ?? [])
         if (data.producers) setProducers(data.producers)
         if (data.clickUpgrades) setClickUpgrades(data.clickUpgrades)
+
+        // Restore timed boosts — check if they're still valid
+        const now = Date.now()
+        const restoredBoosts: ActiveBoosts = { click: null, farm: null }
+        if (data.boostEndClick && data.boostEndClick > now) {
+          restoredBoosts.click = data.boostEndClick
+        }
+        if (data.boostEndFarm && data.boostEndFarm > now) {
+          restoredBoosts.farm = data.boostEndFarm
+        }
+        setActiveBoosts(restoredBoosts)
       }
+
+      // Prestige is stored separately so it survives resets
+      const p = localStorage.getItem("nc_prestige")
+      if (p) setPrestigeLevel(JSON.parse(p))
+
+      // Offline username
       const u = localStorage.getItem("nc_user")
-      if (u) setUser(JSON.parse(u))
+      if (u) {
+        try {
+          const parsed = JSON.parse(u)
+          setUsername(parsed.username ?? parsed)
+        } catch {
+          setUsername(u)
+        }
+      }
     } catch {}
   }, [])
 
-  // Save to localStorage
+  // ─── Save to localStorage ──────────────────────────────────────────────────
   useEffect(() => {
     const t = setTimeout(() => {
       localStorage.setItem("nebulacraft", JSON.stringify({
-        stardust, totalStardust, clickPower, producers, clickUpgrades, gems,
+        stardust,
+        totalStardust,
+        clickPower,
+        gems,
+        producers,
+        clickUpgrades,
+        totalClicks,
+        totalMinutesPlayed,
+        unlockedAchievements,
+        boostEndClick: activeBoosts.click,
+        boostEndFarm: activeBoosts.farm,
       }))
     }, 2000)
     return () => clearTimeout(t)
-  }, [stardust, totalStardust, clickPower, producers, clickUpgrades])
+  }, [stardust, totalStardust, clickPower, gems, producers, clickUpgrades, totalClicks, totalMinutesPlayed, unlockedAchievements, activeBoosts])
 
-  // Game loop
+  // ─── Track played minutes (every 60 seconds) ───────────────────────────────
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTotalMinutesPlayed(m => m + 1)
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // ─── Game loop ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (perSecond === 0) return
+    const farmActive = activeBoosts.farm !== null && activeBoosts.farm > Date.now()
+    const effectivePPS = perSecond * (farmActive ? 5 : 1) * prestigeMultiplier
     const interval = setInterval(() => {
-      const tick = perSecond / 20
+      const tick = effectivePPS / 20
       setStardust((s) => s + tick)
       setTotalStardust((t) => t + tick)
     }, 50)
     return () => clearInterval(interval)
-  }, [perSecond])
+  }, [perSecond, activeBoosts, prestigeMultiplier])
 
-  // Click
+  // ─── Boost expiry watcher ──────────────────────────────────────────────────
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now()
+      setActiveBoosts(prev => {
+        const next = { ...prev }
+        let changed = false
+        if (prev.click !== null && prev.click <= now) { next.click = null; changed = true }
+        if (prev.farm !== null && prev.farm <= now) { next.farm = null; changed = true }
+        return changed ? next : prev
+      })
+    }, 5_000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // ─── Singularity detection ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (currentStage >= 7 && !singularityShownRef.current) {
+      singularityShownRef.current = true
+      setShowSingularity(true)
+    }
+  }, [currentStage])
+
+  // ─── Achievement checker ───────────────────────────────────────────────────
+  useEffect(() => {
+    const totalProducers = producers.reduce((sum, p) => sum + p.count, 0)
+    const stats: AchievementStats = {
+      totalClicks,
+      totalStardust,
+      totalProducers,
+      currentStage,
+      minutesPlayed: totalMinutesPlayed,
+    }
+
+    for (const achievement of ACHIEVEMENTS) {
+      if (!unlockedAchievements.includes(achievement.id) && achievement.check(stats)) {
+        setUnlockedAchievements(prev => [...prev, achievement.id])
+        setToastAchievement({ id: achievement.id, name: achievement.name, icon: achievement.icon, description: achievement.description })
+      }
+    }
+  }, [totalClicks, totalStardust, producers, currentStage, totalMinutesPlayed, unlockedAchievements])
+
+  // ─── Click ─────────────────────────────────────────────────────────────────
   const handleClick = useCallback((e: React.MouseEvent) => {
-    const earned = clickPower
+    const clickActive = activeBoosts.click !== null && activeBoosts.click > Date.now()
+    const earned = clickPower * (clickActive ? 10 : 1) * prestigeMultiplier
     setStardust((s) => s + earned)
     setTotalStardust((t) => t + earned)
+    setTotalClicks((c) => c + 1)
     setPulse(true)
     setTimeout(() => setPulse(false), 100)
 
@@ -538,9 +760,9 @@ export default function NebulaCraft() {
       { id, x, y, vx: (Math.random() - 0.5) * 60, vy: -40 - Math.random() * 40, life: 1, value: `+${fmt(earned)}` },
     ])
     setTimeout(() => setParticles((prev) => prev.filter((p) => p.id !== id)), 900)
-  }, [clickPower])
+  }, [clickPower, activeBoosts, prestigeMultiplier])
 
-  // Buy producer
+  // ─── Buy producer ──────────────────────────────────────────────────────────
   const buyProducer = useCallback((id: string) => {
     setProducers((prev) =>
       prev.map((p) => {
@@ -553,7 +775,7 @@ export default function NebulaCraft() {
     )
   }, [stardust])
 
-  // Buy click upgrade
+  // ─── Buy click upgrade ─────────────────────────────────────────────────────
   const buyClickUpgrade = useCallback((id: string) => {
     setClickUpgrades((prev) =>
       prev.map((u) => {
@@ -565,13 +787,34 @@ export default function NebulaCraft() {
     )
   }, [stardust])
 
+  // ─── Reset ─────────────────────────────────────────────────────────────────
   const resetGame = () => {
     if (!confirm("¿Resetear todo el progreso?")) return
     localStorage.removeItem("nebulacraft")
     setStardust(0); setTotalStardust(0); setClickPower(1); setGems(0)
+    setTotalClicks(0); setTotalMinutesPlayed(0)
     setProducers(INITIAL_PRODUCERS); setClickUpgrades(INITIAL_CLICK_UPGRADES)
+    setActiveBoosts({ click: null, farm: null })
+    singularityShownRef.current = false
+    setShowSingularity(false)
   }
 
+  // ─── Prestige ──────────────────────────────────────────────────────────────
+  const handlePrestige = () => {
+    const newLevel = prestigeLevel + 1
+    setPrestigeLevel(newLevel)
+    localStorage.setItem("nc_prestige", JSON.stringify(newLevel))
+    // Reset gameplay but keep gems and achievements
+    localStorage.removeItem("nebulacraft")
+    setStardust(0); setTotalStardust(0); setClickPower(1)
+    setTotalClicks(0); setTotalMinutesPlayed(0)
+    setProducers(INITIAL_PRODUCERS); setClickUpgrades(INITIAL_CLICK_UPGRADES)
+    setActiveBoosts({ click: null, farm: null })
+    singularityShownRef.current = false
+    setShowSingularity(false)
+  }
+
+  // ─── Shop handlers ─────────────────────────────────────────────────────────
   const handleBuyPack = (pack: typeof GEM_PACKS[0]) => {
     setGems(g => g + pack.gems + pack.bonus)
   }
@@ -579,20 +822,38 @@ export default function NebulaCraft() {
   const handleBuyBoost = (boost: typeof GEM_BOOSTS[0]) => {
     if (gems < boost.cost) return
     setGems(g => g - boost.cost)
-    if (boost.effect === "instant") setStardust(s => s + 10_000)
+
+    if (boost.effect === "instant") {
+      setStardust(s => s + 10_000)
+    }
     if (boost.effect === "timeskip") {
       const hours8 = perSecond * 8 * 3600
       setStardust(s => s + hours8)
       setTotalStardust(t => t + hours8)
     }
-    if (boost.effect === "click") setClickPower(cp => cp * 10)
+    if (boost.effect === "click") {
+      const endTime = Date.now() + 3_600_000 // 1 hour
+      setActiveBoosts(prev => ({ ...prev, click: endTime }))
+    }
     if (boost.effect === "farm") {
-      setProducers(prev => prev.map(p => ({ ...p, baseProduction: p.baseProduction * 5 })))
-      setTimeout(() => setProducers(prev => prev.map(p => ({ ...p, baseProduction: p.baseProduction / 5 }))), 3_600_000)
+      const endTime = Date.now() + 3_600_000 // 1 hour
+      setActiveBoosts(prev => ({ ...prev, farm: endTime }))
     }
   }
 
+  // ─── Username handlers ─────────────────────────────────────────────────────
+  const saveName = () => {
+    const name = nameInput.trim() || "Explorador"
+    setUsername(name)
+    localStorage.setItem("nc_user", JSON.stringify({ username: name }))
+    setEditingName(false)
+  }
+
   const stageData = STAGES[currentStage]
+
+  // Active boost indicators
+  const clickBoostActive = activeBoosts.click !== null && activeBoosts.click > Date.now()
+  const farmBoostActive = activeBoosts.farm !== null && activeBoosts.farm > Date.now()
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-[#030008] flex flex-col">
@@ -606,6 +867,7 @@ export default function NebulaCraft() {
         @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }
         @keyframes floatUp { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-60px); } }
         @keyframes stageIn { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+        @keyframes slideUp { from { opacity: 0; transform: translateX(-50%) translateY(20px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
         .stage-enter { animation: stageIn 0.6s ease forwards; }
       `}</style>
 
@@ -619,33 +881,65 @@ export default function NebulaCraft() {
           <div className="text-2xl font-bold text-yellow-300">✨ {fmt(stardust)}</div>
           <div className="text-xs text-white/50">polvo estelar</div>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-3 shrink-0 flex-wrap justify-end">
           <div className="text-right hidden sm:block">
             <div className="text-xs text-white/50">{fmt(perSecond)}/s · +{fmt(clickPower)}/clic</div>
+            {prestigeLevel > 0 && <div className="text-xs text-yellow-400">✦ Prestigio {prestigeLevel} (×{(1 + prestigeLevel * 0.5).toFixed(1)})</div>}
           </div>
+
+          {/* Active boost indicators */}
+          {clickBoostActive && (
+            <span className="text-xs bg-yellow-500/20 border border-yellow-500/40 text-yellow-300 rounded-lg px-2 py-1">⚡ Turbo activo</span>
+          )}
+          {farmBoostActive && (
+            <span className="text-xs bg-green-500/20 border border-green-500/40 text-green-300 rounded-lg px-2 py-1">🤖 Farm activo</span>
+          )}
+
           {/* Gems */}
           <button onClick={() => setShowShop(true)}
             className="flex items-center gap-1.5 bg-purple-900/60 border border-purple-500/40 rounded-xl px-3 py-1.5 hover:bg-purple-800/60 transition-colors">
             <span className="text-base">💎</span>
             <span className="text-sm font-bold text-purple-300">{gems}</span>
           </button>
+
           {/* Shop */}
           <button onClick={() => setShowShop(true)}
             className="bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white text-xs font-bold px-3 py-2 rounded-xl transition-all">
             🛒 Tienda
           </button>
-          {/* User */}
-          {user ? (
-            <button onClick={() => { localStorage.removeItem("nc_user"); setUser(null) }}
+
+          {/* Achievements */}
+          <button onClick={() => setShowAchievements(true)}
+            className="text-xs border border-white/20 rounded-xl px-3 py-2 text-white/60 hover:text-white hover:border-white/40 transition-colors">
+            🏆 {unlockedAchievements.length}/{ACHIEVEMENTS.length}
+          </button>
+
+          {/* Offline user */}
+          {editingName ? (
+            <div className="flex items-center gap-1">
+              <input
+                value={nameInput}
+                onChange={e => setNameInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditingName(false) }}
+                placeholder="Tu nombre"
+                maxLength={20}
+                autoFocus
+                className="text-xs bg-white/10 border border-purple-500/40 rounded-lg px-2 py-1 text-white placeholder-white/30 focus:outline-none w-28"
+              />
+              <button onClick={saveName} className="text-xs text-green-400 hover:text-green-300">✓</button>
+            </div>
+          ) : username ? (
+            <button onClick={() => { setNameInput(username); setEditingName(true) }}
               className="text-xs text-white/40 hover:text-white/70 transition-colors">
-              👤 {user.username}
+              👤 {username}
             </button>
           ) : (
-            <button onClick={() => router.push("/login")}
+            <button onClick={() => { setNameInput(""); setEditingName(true) }}
               className="text-xs text-white/60 hover:text-white transition-colors border border-white/20 rounded-lg px-2 py-1">
-              Iniciar sesión
+              👤 Modo offline
             </button>
           )}
+
           <button onClick={resetGame} className="text-xs text-white/20 hover:text-red-400 transition-colors">reset</button>
         </div>
       </header>
@@ -703,6 +997,16 @@ export default function NebulaCraft() {
                 />
               </div>
             </div>
+          )}
+
+          {/* Singularity reached — show teaser link if already passed prestige screen */}
+          {currentStage >= 7 && !showSingularity && (
+            <button
+              onClick={() => setShowSingularity(true)}
+              className="text-xs text-purple-400 hover:text-purple-300 border border-purple-500/30 rounded-xl px-4 py-2 transition-colors"
+            >
+              ✦ Ver pantalla de Singularidad
+            </button>
           )}
         </div>
 
@@ -812,9 +1116,34 @@ export default function NebulaCraft() {
       {showShop && (
         <ShopModal
           gems={gems}
+          activeBoosts={activeBoosts}
           onClose={() => setShowShop(false)}
           onBuyPack={handleBuyPack}
           onBuyBoost={handleBuyBoost}
+        />
+      )}
+
+      {/* Achievements panel */}
+      {showAchievements && (
+        <AchievementsPanel
+          unlocked={unlockedAchievements}
+          onClose={() => setShowAchievements(false)}
+        />
+      )}
+
+      {/* Achievement toast */}
+      {toastAchievement && (
+        <AchievementToast
+          achievement={toastAchievement}
+          onDone={() => setToastAchievement(null)}
+        />
+      )}
+
+      {/* Singularity / Prestige screen */}
+      {showSingularity && (
+        <SingularityScreen
+          prestigeLevel={prestigeLevel}
+          onPrestige={handlePrestige}
         />
       )}
     </div>
